@@ -353,6 +353,7 @@
   "Very doubtful...",
   "All your base are belong to us."
  ],
+"reactions": ["😀", "😂", "👍", "👎", "❤️", "👀"],
 "forms": [
   {
     "txt": "Post responseYesДа",

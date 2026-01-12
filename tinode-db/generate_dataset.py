@@ -50,7 +50,7 @@ group_topics = list()
 num_groups = random.randint(1, num_users >> 1)
 for i in range(num_groups):
   owner = random.choice(ul)
-  g = { 
+  g = {
     'createdAt': '-%dh' % random.randint(1, 300),
     'name': '*ABCgroup%d' % i,
     'owner': owner,
@@ -74,7 +74,7 @@ all_ids = [i for i in range(num_users)]
 for i in range(num_users):
   contacts = [ul[x] for x in random.sample(all_ids, num_contacts[i]) if x > i]
   for c in contacts:
-    p2p = { 
+    p2p = {
       'createdAt': '-%dh' % random.randint(1, 300),
       'users': [{'name': ul[i]}, {'name': c}]
     }
@@ -88,9 +88,9 @@ sizes = np.random.poisson(4, num_groups).tolist()
 sizes = [min(max(2, int(s)), num_users) for s in sizes]
 group_subs = list()
 
-for i in range(num_groups): 
+for i in range(num_groups):
   k = sizes[i]
-  gs = random.sample(ul, k) 
+  gs = random.sample(ul, k)
   for uid in gs:
     g = {
       'createdAt': '-%dh' % random.randint(1, 300),
@@ -100,5 +100,17 @@ for i in range(num_groups):
     group_subs.append(g)
 
 data['groupsubs'] = group_subs
+
+# Messages.
+data['messages'] = [
+    "Hello", "Hi", "How are you?", "I'm fine", "What are you doing?", "Nothing",
+    "See you later", "Bye", "Tinode is great", "I like it", "Generic message",
+    "Another one", "One more", "Stuff", "More stuff", "Talking", "Chatting",
+    "Writing code", "Debugging", "Deploying", "Testing", "Running", "Walking",
+    "Eating", "Sleeping", "Dreaming", "Thinking", "Laughing", "Crying", "Smiling"
+]
+
+# Reactions.
+data['reactions'] = ["😀", "😂", "👍", "👎", "❤️", "👀"]
 
 json.dump(data, sys.stdout, ensure_ascii=False, indent=4)

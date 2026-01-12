@@ -279,6 +279,7 @@ func genDb(data *Data, p2pDel bool) {
 	}
 
 	seqIds := map[string]int{}
+	mrrIds := map[string]int{}
 	now := types.TimeNow().Add(-time.Minute * 10)
 
 	messageCount := len(data.Messages)
@@ -336,6 +337,14 @@ func genDb(data *Data, p2pDel bool) {
 					Content:   str,
 				}, nil, true); err != nil {
 					log.Fatal("Failed to insert message: ", err)
+				}
+
+				// Randomly add reactions to 10% of messages.
+				if len(data.Reactions) > 0 && rand.Intn(10) == 0 {
+					mrrIds[topic]++
+					if err := store.Messages.SaveReaction(topic, mrrIds[topic], seqId, from, data.Reactions[rand.Intn(len(data.Reactions))]); err != nil {
+						log.Println("Failed to save reaction:", err)
+					}
 				}
 
 				// New increment: remaining time until 'now' divided by the number of messages to be inserted,

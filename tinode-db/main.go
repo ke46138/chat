@@ -165,6 +165,7 @@ type Data struct {
 	Groupsubs   []GroupSub       `json:"groupsubs"`
 	P2psubs     []P2PSub         `json:"p2psubs"`
 	Messages    []string         `json:"messages"`
+	Reactions   []string         `json:"reactions"`
 	Forms       []map[string]any `json:"forms"`
 	datapath    string
 }
