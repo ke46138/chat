@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -215,7 +214,6 @@ func main() {
 		}
 	}
 
-	rand.Seed(time.Now().UnixNano())
 	data.datapath, _ = filepath.Split(*datafile)
 
 	var config configType
@@ -257,7 +255,7 @@ func main() {
 				log.Fatalln("Database not found.")
 			}
 			log.Println("Database not found. Creating.")
-			err = store.Store.InitDb(config.StoreConfig, false)
+			err = store.Store.InitDb(config.StoreConfig, *reset)
 			if err == nil {
 				log.Println("Database successfully created.")
 				created = true

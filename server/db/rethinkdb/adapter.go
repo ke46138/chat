@@ -402,6 +402,13 @@ func (a *adapter) CreateDb(reset bool) error {
 		}).RunWrite(a.conn); err != nil {
 		return err
 	}
+	// Create secondary index on reactions(topic, mrrid) for partial fetching.
+	if _, err := rdb.DB(a.dbName).Table("reactions").IndexCreateFunc("Topic_MrrId",
+		func(row rdb.Term) any {
+			return []any{row.Field("Topic"), row.Field("MrrId")}
+		}).RunWrite(a.conn); err != nil {
+		return err
+	}
 	// Create secondary index on reactions(topic, user, seqid) for uniqueness.
 	if _, err := rdb.DB(a.dbName).Table("reactions").IndexCreateFunc("Topic_UserId_SeqId",
 		func(row rdb.Term) any {
@@ -409,6 +416,18 @@ func (a *adapter) CreateDb(reset bool) error {
 			return []any{row.Field("Topic"), row.Field("User"), row.Field("SeqId")}
 		}).RunWrite(a.conn); err != nil {
 		return err
+	}
+	// Create secondary index on reactions(topic) for grouping.
+	if _, err := rdb.DB(a.dbName).Table("reactions").IndexCreate("Topic").RunWrite(a.conn); err != nil {
+		return err
+	}
+
+	// Wait for indexes to catch up.
+	tables := []string{"users", "topics", "auth", "subscriptions", "messages", "dellog", "credentials", "fileuploads", "reactions"}
+	for _, tbl := range tables {
+		if _, err := rdb.DB(a.dbName).Table(tbl).IndexWait().Run(a.conn); err != nil {
+			return err
+		}
 	}
 
 	// Record current DB version.
@@ -599,15 +618,12 @@ func (a *adapter) UpgradeDb() error {
 			}).RunWrite(a.conn); err != nil {
 			return err
 		}
-
-		// Create index on messages(Topic, UpdatedAt) for fetching updates.
-		if _, err := rdb.DB(a.dbName).Table("messages").IndexCreateFunc("Topic_UpdatedAt",
-			func(row rdb.Term) any {
-				return []any{row.Field("Topic"), row.Field("UpdatedAt")}
-			}).RunWrite(a.conn); err != nil {
+		// Create secondary index on reactions(topic) for grouping.
+		if _, err := rdb.DB(a.dbName).Table("reactions").IndexCreate("Topic").RunWrite(a.conn); err != nil {
 			return err
 		}
 
+		// Bump version.
 		if err := bumpVersion(a, 117); err != nil {
 			return err
 		}
@@ -1438,6 +1454,17 @@ func (a *adapter) TopicGet(topic string) (*t.Topic, error) {
 			}
 		}
 	}
+
+	// Read Max reaction ID.
+	if cursor, err = rdb.DB(a.dbName).Table("reactions").
+		GetAllByIndex("Topic", topic).
+		Max("MrrId").Field("MrrId").Run(a.conn); err == nil {
+		var mrrid int
+		if err = cursor.One(&mrrid); err == nil {
+			tt.MrrId = mrrid
+		}
+	}
+
 	// RethinkDB go driver incorrectly converts UTC timezone to +0000
 	tt.CreatedAt = tt.CreatedAt.UTC()
 	tt.UpdatedAt = tt.UpdatedAt.UTC()
@@ -1617,6 +1644,38 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	// Fetch max reaction ID for each topic:
+	// iterate Join to collect all topics.
+	allTopics := make([]any, 0, len(join))
+	topicToJoinKey := make(map[string]string)
+	for key, sub := range join {
+		allTopics = append(allTopics, sub.Topic)
+		topicToJoinKey[sub.Topic] = key
+	}
+
+	if len(allTopics) > 0 {
+		cursor, err = rdb.DB(a.dbName).Table("reactions").
+			GetAllByIndex("Topic", allTopics...).
+			Group("Topic").Max("MrrId").Ungroup().Run(a.conn)
+		if err == nil {
+			var res struct {
+				Group     string `rethink:"group"`
+				Reduction struct {
+					MrrId int `rethink:"MrrId"`
+				} `rethink:"reduction"`
+			}
+			for cursor.Next(&res) {
+				if key, ok := topicToJoinKey[res.Group]; ok {
+					if sub, ok := join[key]; ok {
+						sub.SetMrrId(res.Reduction.MrrId)
+						join[key] = sub
+					}
+				}
+			}
+			cursor.Close()
 		}
 	}
 
@@ -2288,11 +2347,10 @@ func (a *adapter) MessageSave(msg *t.Message) error {
 	return err
 }
 
-// messageGetQuery returns a cursor for messages matching the given projection and query options.
-func (a *adapter) messageGetQuery(projection string, topic string, forUser t.Uid, opts *t.QueryOpt) (*rdb.Cursor, error) {
-	var limit = a.maxMessageResults
+// MessageGetAll retrieves all messages available to the given user.
+func (a *adapter) MessageGetAll(topic string, forUser t.Uid, asChan bool, opts *t.QueryOpt) ([]t.Message, error) {
+	limit := a.maxMessageResults
 	var lower, upper any
-
 	upper = rdb.MaxVal
 	lower = rdb.MinVal
 
@@ -2309,26 +2367,47 @@ func (a *adapter) messageGetQuery(projection string, topic string, forUser t.Uid
 		}
 	}
 
-	lower = []any{topic, lower}
-	upper = []any{topic, upper}
-
-	requester := forUser.String()
-
-	// Base query for range
-	q1 := rdb.DB(a.dbName).Table("messages").
-		Between(lower, upper, rdb.BetweenOpts{Index: "Topic_SeqId"})
-
+	q := rdb.DB(a.dbName).Table("messages")
 	var query rdb.Term
-	if opts != nil && opts.IfModifiedSince != nil {
-		// Query for updates
-		q2 := rdb.DB(a.dbName).Table("messages").
-			Between([]any{topic, opts.IfModifiedSince}, []any{topic, rdb.MaxVal}, rdb.BetweenOpts{Index: "Topic_UpdatedAt", LeftBound: "open"})
 
-		query = q1.Union(q2).Distinct()
+	if opts != nil && len(opts.IdRanges) > 0 {
+		var unionQ rdb.Term
+		first := true
+		for _, r := range opts.IdRanges {
+			// Between is left-closed, right-open [low, high).
+			// If Hi is 0, it means [Low, Low+1) to match just Low.
+			l := []any{topic, r.Low}
+			var u any
+			if r.Hi == 0 {
+				u = []any{topic, r.Low + 1}
+			} else {
+				u = []any{topic, r.Hi}
+			}
+
+			part := q.Between(l, u, rdb.BetweenOpts{Index: "Topic_SeqId"})
+			if first {
+				unionQ = part
+				first = false
+			} else {
+				unionQ = unionQ.Union(part)
+			}
+		}
+		query = unionQ
 	} else {
-		query = q1
+		// Base query for range
+		q1 := q.Between([]any{topic, lower}, []any{topic, upper}, rdb.BetweenOpts{Index: "Topic_SeqId"})
+
+		if opts != nil && opts.IfModifiedSince != nil {
+			// Query for updates
+			q2 := q.Between([]any{topic, opts.IfModifiedSince}, []any{topic, rdb.MaxVal}, rdb.BetweenOpts{Index: "Topic_UpdatedAt", LeftBound: "open"})
+
+			query = q1.Union(q2).Distinct()
+		} else {
+			query = q1
+		}
 	}
 
+	requester := forUser.String()
 	query = query.
 		// Ordering by index must come before filtering
 		OrderBy(rdb.OrderByOpts{Index: rdb.Desc("Topic_SeqId")}).
@@ -2340,28 +2419,10 @@ func (a *adapter) messageGetQuery(projection string, topic string, forUser t.Uid
 				func(df rdb.Term) any {
 					return df.Field("User").Eq(requester)
 				}))
-		}).Limit(limit)
-
-	// Apply projection if provided (comma separated, like "SeqId,Content").
-	if strings.TrimSpace(projection) != "" {
-		parts := strings.Split(projection, ",")
-		fields := make([]any, len(parts))
-		for i := range parts {
-			fields[i] = strings.TrimSpace(parts[i])
-		}
-		query = query.Pluck(fields...)
-	}
+		}).Limit(limit).
+		Pluck("SeqId", "CreatedAt", "DeletedAt", "DelId", "SeqId", "Topic", "From", "Head", "Content")
 
 	cursor, err := query.Run(a.conn)
-	if err != nil {
-		return nil, err
-	}
-	return cursor, nil
-}
-
-// MessageGetAll retrieves all messages available to the given user.
-func (a *adapter) MessageGetAll(topic string, forUser t.Uid, asChan bool, opts *t.QueryOpt) ([]t.Message, error) {
-	cursor, err := a.messageGetQuery("SeqId,CreatedAt,UpdatedAt,DeletedAt,DelId,SeqId,Topic,From,Head,Content", topic, forUser, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -2376,6 +2437,9 @@ func (a *adapter) MessageGetAll(topic string, forUser t.Uid, asChan bool, opts *
 		var seqIds []int
 		for i := range msgs {
 			seqIds = append(seqIds, msgs[i].SeqId)
+			if !asChan {
+				msgs[i].From = t.ParseUid(msgs[i].From).UserId()
+			}
 		}
 		// Fetch reactions for these messages.
 		reacts, err := a.reactionsForSet(topic, forUser, asChan, nil, seqIds)
@@ -2407,14 +2471,7 @@ func (a *adapter) ReactionSave(r *t.Reaction) error {
 	}
 
 	// Insert new reaction.
-	if _, err = rdb.DB(a.dbName).Table("reactions").Insert(r).RunWrite(a.conn); err != nil {
-		return err
-	}
-
-	// Update message timestamp.
-	_, err = rdb.DB(a.dbName).Table("messages").
-		GetAllByIndex("Topic_SeqId", []any{r.Topic, r.SeqId}).
-		Update(map[string]any{"UpdatedAt": r.CreatedAt}).RunWrite(a.conn)
+	_, err = rdb.DB(a.dbName).Table("reactions").Insert(r).RunWrite(a.conn)
 	return err
 }
 
@@ -2424,14 +2481,7 @@ func (a *adapter) ReactionDelete(topic string, seqId int, userId t.Uid) error {
 	_, err := rdb.DB(a.dbName).Table("reactions").
 		GetAllByIndex("Topic_UserId_SeqId", []any{topic, userId.String(), seqId}).
 		Delete().RunWrite(a.conn)
-	if err != nil {
-		return err
-	}
 
-	// Update message timestamp.
-	_, err = rdb.DB(a.dbName).Table("messages").
-		GetAllByIndex("Topic_SeqId", []any{topic, seqId}).
-		Update(map[string]any{"UpdatedAt": t.TimeNow()}).RunWrite(a.conn)
 	return err
 }
 
@@ -2443,47 +2493,57 @@ func (a *adapter) ReactionGetAll(topic string, forUser t.Uid, asChan bool, opt *
 // reactionsForSet loads reactions for messages identified by seqIds in the given topic.
 // Returns a map of seqId to list of aggregate reactions.
 func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts *t.QueryOpt, seqIds []int) (map[int][]t.OneTypeReaction, error) {
+	var query rdb.Term
 	if len(seqIds) == 0 {
 		if opts == nil || (len(opts.IdRanges) == 0 && (opts.Since <= 0 && opts.Before <= 1)) {
 			return nil, t.ErrMalformed
 		}
 
-		// No explicit list of seqIds provided. Use shared helper to fetch seqids according to options.
-		cursor, err := a.messageGetQuery("SeqId", topic, forUser, opts)
-		if err != nil {
-			return nil, err
+		// Fetch by Topic_MrrId
+		// Note: we assume opts refer to MrrId when querying reactions directly.
+		var lower, upper any
+		upper = rdb.MaxVal
+		lower = rdb.MinVal
+
+		if opts.Since > 0 {
+			lower = opts.Since
 		}
-		defer cursor.Close()
-		var doc struct{ SeqId int }
-		for cursor.Next(&doc) {
-			seqIds = append(seqIds, doc.SeqId)
+		if opts.Before > 0 {
+			upper = opts.Before
 		}
-		if err := cursor.Err(); err != nil {
-			return nil, err
+
+		query = rdb.DB(a.dbName).Table("reactions").
+			Between([]any{topic, lower}, []any{topic, upper}, rdb.BetweenOpts{Index: "Topic_MrrId"})
+
+		if opts.Limit > 0 {
+			query = query.Limit(opts.Limit)
 		}
+
+	} else {
+		// Fetch reactions for the given seqIds
+		// Build composite keys for Topic_SeqId index: [topic, seqId]
+		keys := make([]any, 0, len(seqIds))
+		for _, s := range seqIds {
+			keys = append(keys, []any{topic, s})
+		}
+		query = rdb.DB(a.dbName).Table("reactions").GetAllByIndex("Topic_SeqId", keys...)
 	}
 
-	if len(seqIds) == 0 {
-		// No messages found, nothing to do.
-		return nil, nil
-	}
-
-	// Fetch reactions for the given seqIds
-	// Build composite keys for Topic_SeqId index: [topic, seqId]
-	keys := make([]any, 0, len(seqIds))
-	for _, s := range seqIds {
-		keys = append(keys, []any{topic, s})
-	}
-	cursor, err := rdb.DB(a.dbName).Table("reactions").GetAllByIndex("Topic_SeqId", keys...).Run(a.conn)
+	cursor, err := query.Run(a.conn)
 	if err != nil {
 		return nil, err
 	}
 	defer cursor.Close()
 
 	// Aggregate into map[seqid]map[content]*OneTypeReaction
+	// We also verify which seqIds we actually found reactions for, to optimize the user-check pass.
 	agg := make(map[int]map[string]*t.OneTypeReaction)
+	foundSeqIds := make(map[int]struct{})
+
 	var rec t.Reaction
 	for cursor.Next(&rec) {
+		foundSeqIds[rec.SeqId] = struct{}{}
+
 		if _, ok := agg[rec.SeqId]; !ok {
 			agg[rec.SeqId] = make(map[string]*t.OneTypeReaction)
 		}
@@ -2506,10 +2566,10 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 	}
 
 	// If asChan, mark current user's reactions via separate query
-	if asChan {
+	if asChan && len(foundSeqIds) > 0 {
 		// Build keys for Topic_UserId_SeqId index: [topic, user, seqId]
-		ukeys := make([]any, 0, len(seqIds))
-		for _, s := range seqIds {
+		ukeys := make([]any, 0, len(foundSeqIds))
+		for s := range foundSeqIds {
 			ukeys = append(ukeys, []any{topic, forUser.String(), s})
 		}
 		uTerm := rdb.DB(a.dbName).Table("reactions").GetAllByIndex("Topic_UserId_SeqId", ukeys...)

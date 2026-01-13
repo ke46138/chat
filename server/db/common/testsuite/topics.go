@@ -193,3 +193,57 @@ func RunSubsForTopic(t *testing.T, adp adapter.Adapter, td *test_data.TestData) 
 		t.Errorf("Subs length mismatch: got %v want %v", len(gotSubs), 0)
 	}
 }
+
+func RunTopicsForUserWithReactions(t *testing.T, adp adapter.Adapter, td *test_data.TestData) {
+	t.Helper()
+
+	// 1. Pick a user (Users[0]) and a topic.
+	// Use Topics[0] to avoid conflict with RunReactionsCRUD which uses Topics[1].
+	topicName := td.Topics[0].Id
+	user := td.Users[0]
+	// Tests use "usr" + numeric ID string.
+	uid := types.ParseUserId("usr" + user.Id)
+
+	// 2. Add a reaction with explicit MrrId.
+	expectedMrrId := 12345
+	react := &types.Reaction{
+		Topic: topicName,
+		// Assuming SeqId 1 exists or is valid for FK if enforced.
+		SeqId:     1,
+		User:      uid.UserId(),
+		Content:   "👍",
+		CreatedAt: types.TimeNow(),
+		MrrId:     expectedMrrId,
+	}
+
+	if err := adp.ReactionSave(react); err != nil {
+		t.Fatalf("ReactionSave failed: %v", err)
+	}
+	defer func() {
+		if err := adp.ReactionDelete(react.Topic, react.SeqId, uid); err != nil {
+			t.Logf("Failed to clean up reaction: %v", err)
+		}
+	}()
+
+	// 3. Fetch topics for user.
+	// We want to verify that the returned subscription includes the MrrId from the reaction.
+	// QueryOpt with Limit to stay consistent.
+	qOpts := types.QueryOpt{Limit: 10}
+	subs, err := adp.TopicsForUser(uid, false, &qOpts)
+	if err != nil {
+		t.Fatalf("TopicsForUser failed: %v", err)
+	}
+
+	found := false
+	for _, sub := range subs {
+		if sub.Topic == topicName {
+			found = true
+			if sub.GetMrrId() != expectedMrrId {
+				t.Errorf("MrrId mismatch for topic %s: got %d, want %d", topicName, sub.GetMrrId(), expectedMrrId)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Topic %s not found in user's subscriptions", topicName)
+	}
+}

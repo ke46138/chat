@@ -436,6 +436,11 @@ func (a *adapter) CreateDb(reset bool) error {
 			Collection: "reactions",
 			IndexOpts:  mdb.IndexModel{Keys: b.D{{"topic", 1}, {"seqid", 1}}},
 		},
+		// Compound index on 'topic - mrrid' for fast lookup of max reaction id per topic.
+		{
+			Collection: "reactions",
+			IndexOpts:  mdb.IndexModel{Keys: b.D{{"topic", 1}, {"mrrid", 1}}},
+		},
 		// Compound unique index on 'topic - userid - seqid' to ensure one reaction per user per message.
 		{
 			Collection: "reactions",
@@ -589,6 +594,11 @@ func (a *adapter) UpgradeDb() error {
 		// Create index on reactions(topic, seqid).
 		if _, err = a.db.Collection("reactions").Indexes().CreateOne(a.ctx,
 			mdb.IndexModel{Keys: b.D{{"topic", 1}, {"seqid", 1}}}); err != nil {
+			return err
+		}
+		// Create index on reactions(topic, mrrid).
+		if _, err = a.db.Collection("reactions").Indexes().CreateOne(a.ctx,
+			mdb.IndexModel{Keys: b.D{{"topic", 1}, {"mrrid", 1}}}); err != nil {
 			return err
 		}
 		// Create unique index on reactions(topic, userid, seqid).
@@ -1564,6 +1574,8 @@ func (a *adapter) TopicGet(topic string) (*t.Topic, error) {
 		}
 	}
 
+	// TODO: Fetch and assign MrrId.
+
 	tt.Public = unmarshalBsonD(tt.Public)
 	tt.Trusted = unmarshalBsonD(tt.Trusted)
 
@@ -1745,6 +1757,44 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 		cur.Close(a.ctx)
 
 		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Fetch max reaction IDs (MrrId) and join to subscriptions.
+	if len(join) > 0 {
+		topicsToCheck := make([]string, 0, len(join))
+		for tname := range join {
+			topicsToCheck = append(topicsToCheck, tname)
+		}
+
+		pipeline := mdb.Pipeline{
+			bson.D{{Key: "$match", Value: bson.M{"topic": bson.M{"$in": topicsToCheck}}}},
+			bson.D{{Key: "$group", Value: bson.M{
+				"_id":   "$topic",
+				"mrrid": bson.M{"$max": "$mrrid"},
+			}}},
+		}
+
+		reactCur, err := a.db.Collection("reactions").Aggregate(a.ctx, pipeline)
+		if err != nil {
+			return nil, err
+		}
+		defer reactCur.Close(a.ctx)
+
+		for reactCur.Next(a.ctx) {
+			var doc struct {
+				Topic string `bson:"_id"`
+				MrrId int    `bson:"mrrid"`
+			}
+			if err := reactCur.Decode(&doc); err == nil {
+				if sub, ok := join[doc.Topic]; ok {
+					sub.SetMrrId(doc.MrrId)
+					join[doc.Topic] = sub
+				}
+			}
+		}
+		if err := reactCur.Err(); err != nil {
 			return nil, err
 		}
 	}
@@ -2526,23 +2576,10 @@ func (a *adapter) MessageSave(msg *t.Message) error {
 	return err
 }
 
-// messageGetQuery returns a cursor for messages matching the query projection and options.
-func (a *adapter) messageGetQuery(projection string, topic string, forUser t.Uid, opts *t.QueryOpt) (*mdb.Cursor, error) {
-	var limit = a.maxMessageResults
-	var lower, upper int
+// MessageGetAll returns messages matching the query.
+func (a *adapter) MessageGetAll(topic string, forUser t.Uid, asChan bool, opts *t.QueryOpt) ([]t.Message, error) {
+	limit := a.maxMessageResults
 	requester := forUser.String()
-	if opts != nil {
-		if opts.Since > 0 {
-			lower = opts.Since
-		}
-		if opts.Before > 0 {
-			upper = opts.Before
-		}
-
-		if opts.Limit > 0 && opts.Limit < limit {
-			limit = opts.Limit
-		}
-	}
 
 	filter := b.M{
 		"topic":           topic,
@@ -2550,71 +2587,52 @@ func (a *adapter) messageGetQuery(projection string, topic string, forUser t.Uid
 		"deletedfor.user": b.M{"$ne": requester},
 	}
 
-	// Build seqid filter
-	seqIdFilter := b.M{}
-	if upper == 0 {
-		seqIdFilter = b.M{"$gte": lower}
-	} else {
-		seqIdFilter = b.M{"$gte": lower, "$lt": upper}
-	}
-
-	if opts != nil && opts.IfModifiedSince != nil {
-		filter["$or"] = []b.M{
-			{"seqid": seqIdFilter},
-			{"updatedat": b.M{"$gt": *opts.IfModifiedSince}},
+	if opts != nil {
+		if opts.Limit > 0 && opts.Limit < limit {
+			limit = opts.Limit
 		}
-	} else {
-		filter["seqid"] = seqIdFilter
-	}
 
-	// If IdRanges provided, override seqid filter and build $or ranges.
-	if opts != nil && len(opts.IdRanges) > 0 {
-		var ors []b.M
-		for _, r := range opts.IdRanges {
-			if r.Hi == 0 {
-				ors = append(ors, b.M{"seqid": r.Low})
+		if len(opts.IdRanges) > 0 {
+			var ors []b.M
+			for _, r := range opts.IdRanges {
+				if r.Hi == 0 {
+					ors = append(ors, b.M{"seqid": r.Low})
+				} else {
+					ors = append(ors, b.M{"seqid": b.M{"$gte": r.Low, "$lt": r.Hi}})
+				}
+			}
+			if len(ors) > 0 {
+				filter["$or"] = ors
+			}
+		} else {
+			var lower, upper int
+			if opts.Since > 0 {
+				lower = opts.Since
+			}
+			if opts.Before > 0 {
+				upper = opts.Before
+			}
+
+			// Build seqid filter
+			seqIdFilter := b.M{}
+			if upper == 0 {
+				seqIdFilter = b.M{"$gte": lower}
 			} else {
-				ors = append(ors, b.M{"seqid": b.M{"$gte": r.Low, "$lt": r.Hi}})
+				seqIdFilter = b.M{"$gte": lower, "$lt": upper}
 			}
+			filter["seqid"] = seqIdFilter
 		}
-		if len(ors) > 0 {
-			filter["$or"] = ors
-			// If IfModifiedSince exists, keep it as an additional $or entry.
-			if opts.IfModifiedSince != nil {
-				filter["$or"] = append(filter["$or"].(b.A), b.M{"updatedat": b.M{"$gt": *opts.IfModifiedSince}})
-			}
-		}
+	} else {
+		filter["seqid"] = b.M{"$gte": 0}
 	}
 
-	// Parse projection string into bson projection map
-	proj := bson.M{}
-	if projection != "" {
-		parts := strings.Split(projection, ",")
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				proj[p] = 1
-			}
-		}
-	}
+	findOpts := mdbopts.Find().SetSort(bson.D{{Key: "seqid", Value: -1}}).SetLimit(int64(limit)).
+		SetProjection(b.M{
+			"createdat": 1, "deletedat": 1, "delid": 1, "seqid": 1,
+			"topic": 1, "from": 1, "head": 1, "content": 1,
+		})
 
-	findOpts := mdbopts.Find().SetSort(bson.D{{Key: "seqid", Value: -1}}).SetLimit(int64(limit))
-	if len(proj) > 0 {
-		findOpts.SetProjection(proj)
-	}
-
-	cur, err := a.db.Collection("messages").Find(a.ctx, filter, findOpts)
-	if err != nil {
-		return nil, err
-	}
-	return cur, nil
-}
-
-// MessageGetAll returns messages matching the query.
-func (a *adapter) MessageGetAll(topic string, forUser t.Uid, asChan bool, opts *t.QueryOpt) ([]t.Message, error) {
-	cursor, err := a.messageGetQuery(
-		"createdat,updatedat,deletedat,delid,seqid,topic,from,head,content",
-		topic, forUser, opts)
+	cursor, err := a.db.Collection("messages").Find(a.ctx, filter, findOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -2661,16 +2679,9 @@ func (a *adapter) MessageGetAll(topic string, forUser t.Uid, asChan bool, opts *
 func (a *adapter) ReactionSave(r *t.Reaction) error {
 	_, err := a.db.Collection("reactions").UpdateOne(a.ctx,
 		b.M{"topic": r.Topic, "userid": r.User, "seqid": r.SeqId},
-		b.M{"$set": b.M{"content": r.Content}},
+		b.M{"$set": b.M{"content": r.Content, "createdat": r.CreatedAt, "mrrid": r.MrrId}},
 		mdbopts.Update().SetUpsert(true))
-	if err != nil {
-		return err
-	}
 
-	// Update message timestamp.
-	_, err = a.db.Collection("messages").UpdateOne(a.ctx,
-		b.M{"topic": r.Topic, "seqid": r.SeqId},
-		b.M{"$set": b.M{"updatedat": r.CreatedAt}})
 	return err
 }
 
@@ -2679,14 +2690,7 @@ func (a *adapter) ReactionDelete(topic string, seqId int, userId t.Uid) error {
 	// Note: userid stored in MongoDB is raw base64 (no 'usr' prefix).
 	_, err := a.db.Collection("reactions").DeleteOne(a.ctx,
 		b.M{"topic": topic, "userid": userId.String(), "seqid": seqId})
-	if err != nil {
-		return err
-	}
 
-	// Update message timestamp.
-	_, err = a.db.Collection("messages").UpdateOne(a.ctx,
-		b.M{"topic": topic, "seqid": seqId},
-		b.M{"$set": b.M{"updatedat": t.TimeNow()}})
 	return err
 }
 
@@ -2699,65 +2703,87 @@ func (a *adapter) ReactionGetAll(topic string, forUser t.Uid, asChan bool, opt *
 // Returns a map of seqId to list of aggregate reactions.
 func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts *t.QueryOpt, seqIds []int) (map[int][]t.OneTypeReaction, error) {
 	// If seqIds not provided, build seq filter from opts and select seqIds from messages.
-	if len(seqIds) == 0 {
-		if opts == nil || (len(opts.IdRanges) == 0 && (opts.Since <= 0 && opts.Before <= 1)) {
+	var filter bson.M
+	limit := -1
+
+	// If seqIds are explicitly provided, use them.
+	// Otherwise, use opts to build a filter.
+	if len(seqIds) > 0 {
+		filter = bson.M{"topic": topic, "seqid": bson.M{"$in": seqIds}}
+	} else if opts != nil {
+		if len(opts.IdRanges) == 0 && (opts.Since <= 0 && opts.Before <= 1) {
 			return nil, t.ErrMalformed
 		}
 
-		// No explicit list of seqIds provided. Use shared helper to fetch seqids according to options.
-		cursor, err := a.messageGetQuery("seqid", topic, forUser, opts)
-		if err != nil {
-			return nil, err
+		filter = bson.M{"topic": topic}
+		if opts.Since > 0 && opts.Before > 1 {
+			filter["mrrid"] = bson.M{"$gte": opts.Since, "$lt": opts.Before}
+		} else if opts.Since > 0 {
+			filter["mrrid"] = bson.M{"$gte": opts.Since}
+		} else if opts.Before > 1 {
+			filter["mrrid"] = bson.M{"$lt": opts.Before}
+		} else {
+			return nil, t.ErrMalformed
 		}
-		defer cursor.Close(a.ctx)
-		for cursor.Next(a.ctx) {
-			var doc struct {
-				SeqId int `bson:"seqid"`
-			}
-			if err := cursor.Decode(&doc); err != nil {
-				return nil, err
-			}
-			seqIds = append(seqIds, doc.SeqId)
-		}
-		if err := cursor.Err(); err != nil {
-			return nil, err
-		}
-	}
 
-	if len(seqIds) == 0 {
-		return nil, nil
+		if opts.Limit > 0 {
+			limit = opts.Limit
+		} else {
+			limit = a.maxResults
+		}
+	} else {
+		// No explicit seqIds and no opts provided.
+		return nil, t.ErrMalformed
 	}
 
 	reactColl := a.db.Collection("reactions")
 	// Build aggregation pipeline to group by seqid & content.
-	matchStage := bson.D{{Key: "$match", Value: bson.M{"topic": topic, "seqid": bson.M{"$in": seqIds}}}}
+	matchStage := bson.D{{Key: "$match", Value: filter}}
 	var pipeline mdb.Pipeline
 	if asChan {
 		// count reactions per seqid,content
 		groupStage := bson.D{{Key: "$group", Value: bson.M{
-			"_id": bson.M{"seqid": "$seqid", "content": "$content"},
-			"cnt": bson.M{"$sum": 1},
+			"_id":   bson.M{"seqid": "$seqid", "content": "$content"},
+			"cnt":   bson.M{"$sum": 1},
+			"mrrid": bson.M{"$max": "$mrrid"},
 		}}}
 		projectStage := bson.D{{Key: "$project", Value: bson.M{
 			"seqid":   "$_id.seqid",
 			"content": "$_id.content",
 			"cnt":     "$cnt",
+			"mrrid":   "$mrrid",
 			"_id":     0,
 		}}}
-		pipeline = mdb.Pipeline{matchStage, groupStage, projectStage}
+		pipeline = mdb.Pipeline{matchStage, groupStage}
+		if len(seqIds) == 0 {
+			pipeline = append(pipeline, bson.D{{Key: "$sort", Value: bson.D{{"mrrid", -1}}}})
+			if limit > 0 {
+				pipeline = append(pipeline, bson.D{{Key: "$limit", Value: int64(limit)}})
+			}
+		}
+		pipeline = append(pipeline, projectStage)
 	} else {
 		// aggregate users array per seqid,content
 		groupStage := bson.D{{Key: "$group", Value: bson.M{
 			"_id":   bson.M{"seqid": "$seqid", "content": "$content"},
 			"users": bson.M{"$push": "$userid"},
+			"mrrid": bson.M{"$max": "$mrrid"},
 		}}}
 		projectStage := bson.D{{Key: "$project", Value: bson.M{
 			"seqid":   "$_id.seqid",
 			"content": "$_id.content",
 			"users":   "$users",
+			"mrrid":   "$mrrid",
 			"_id":     0,
 		}}}
-		pipeline = mdb.Pipeline{matchStage, groupStage, projectStage}
+		pipeline = mdb.Pipeline{matchStage, groupStage}
+		if len(seqIds) == 0 {
+			pipeline = append(pipeline, bson.D{{Key: "$sort", Value: bson.D{{"mrrid", -1}}}})
+			if limit > 0 {
+				pipeline = append(pipeline, bson.D{{Key: "$limit", Value: int64(limit)}})
+			}
+		}
+		pipeline = append(pipeline, projectStage)
 	}
 
 	cursor, err := reactColl.Aggregate(a.ctx, pipeline)
@@ -2768,6 +2794,7 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 
 	reactions := make(map[int][]t.OneTypeReaction)
 	if asChan {
+		var collectedSeqIds []int
 		for cursor.Next(a.ctx) {
 			var doc struct {
 				SeqId   int    `bson:"seqid"`
@@ -2783,6 +2810,7 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 				Users:   nil,
 			}
 			reactions[doc.SeqId] = append(reactions[doc.SeqId], r)
+			collectedSeqIds = append(collectedSeqIds, doc.SeqId)
 		}
 		if err := cursor.Err(); err != nil {
 			return nil, err
@@ -2790,7 +2818,7 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 
 		// Now get reactions of the current user to mark them in the list.
 		// DB stores userid as raw base64 string (without 'usr' prefix), so use forUser.String() to match stored value.
-		userFilter := bson.M{"topic": topic, "userid": forUser.String(), "seqid": bson.M{"$in": seqIds}}
+		userFilter := bson.M{"topic": topic, "userid": forUser.String(), "seqid": bson.M{"$in": collectedSeqIds}}
 		userCursor, err := reactColl.Find(a.ctx, userFilter, options.Find().SetProjection(bson.M{"seqid": 1, "content": 1}))
 		if err != nil {
 			return nil, err

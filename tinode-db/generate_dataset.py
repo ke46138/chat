@@ -111,6 +111,6 @@ data['messages'] = [
 ]
 
 # Reactions.
-data['reactions'] = ["😀", "😂", "👍", "👎", "❤️", "👀"]
+data['reactions'] = ["😀", "🥰", "👍", "👎", "❤️", "👀", "🙏"]
 
 json.dump(data, sys.stdout, ensure_ascii=False, indent=4)

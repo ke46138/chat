@@ -1704,6 +1704,11 @@ func (a *adapter) TopicGet(topic string) (*t.Topic, error) {
 		}
 	}
 
+	if err := a.db.GetContext(ctx, &tt.MrrId,
+		"SELECT COALESCE(MAX(mrrid),0) FROM reactions WHERE topic=?", topic); err != nil {
+		return nil, err
+	}
+
 	tt.Owner = common.EncodeUidString(tt.Owner).String()
 	tt.Public = common.FromJSON(tt.Public)
 	tt.Trusted = common.FromJSON(tt.Trusted)
@@ -1765,8 +1770,8 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 	// Fetch subscriptions. Two queries are needed: users table (p2p) and topics table (grp).
 	// Prepare a list of separate subscriptions to users vs topics
 	join := make(map[string]t.Subscription) // Keeping these to make a join with table for .private and .access
-	topq := make([]any, 0, 16)
-	usrq := make([]any, 0, 16)
+	topq := make([]any, 0, 16)              // Topics to query
+	usrq := make([]any, 0, 16)              // Users to query
 	for rows.Next() {
 		var sub t.Subscription
 		if err = rows.StructScan(&sub); err != nil {
@@ -1925,6 +1930,44 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 		}
 	}
 
+	// Fetch max reaction IDs and join to subscriptions.
+	q = "SELECT topic, MAX(mrrid) AS maxid FROM reactions WHERE topic IN (?) GROUP BY topic"
+	args = make([]any, 0, len(join))
+	for tname := range join {
+		args = append(args, tname)
+	}
+	q, args, _ = sqlx.In(q, args)
+	ctx4, cancel4 := a.getContext()
+	if cancel4 != nil {
+		defer cancel4()
+	}
+	rows, err = a.db.QueryxContext(ctx4, a.db.Rebind(q), args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var tname string
+	var mrrid int
+	for rows.Next() {
+		if err = rows.Scan(&tname, &mrrid); err != nil {
+			break
+		}
+		if sub, ok := join[tname]; ok {
+			sub.SetMrrId(mrrid)
+			join[tname] = sub
+		}
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert map to slice
+
 	subs = make([]t.Subscription, 0, len(join))
 	for _, sub := range join {
 		subs = append(subs, sub)
@@ -1934,7 +1977,7 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 }
 
 // UsersForTopic loads users subscribed to the given topic (not channel readers).
-// The difference between UsersForTopic vs SubsForTopic is that the former loads user.Public,
+// The difference between UsersForTopic vs SubsForTopic is that the former loads user.Public, Trusted, MrrId values,
 // the latter does not.
 func (a *adapter) UsersForTopic(topic string, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error) {
 	tcat := t.GetTopicCat(topic)
@@ -3043,8 +3086,9 @@ func (a *adapter) ReactionSave(r *t.Reaction) error {
 
 	_, err = tx.ExecContext(ctx,
 		"INSERT INTO reactions(createdat,topic,mrrid,seqid,userid,content) VALUES(?,?,?,?,?,?) "+
-			"ON DUPLICATE KEY UPDATE content=?,createdat=?",
-		r.CreatedAt, r.Topic, r.MrrId, r.SeqId, store.DecodeUid(t.ParseUid(r.User)), r.Content, r.Content, r.CreatedAt)
+			"ON DUPLICATE KEY UPDATE mrrid=?,content=?,createdat=?",
+		r.CreatedAt, r.Topic, r.MrrId, r.SeqId, store.DecodeUid(t.ParseUid(r.User)), r.Content,
+		r.MrrId, r.Content, r.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -3058,20 +3102,12 @@ func (a *adapter) ReactionDelete(topic string, seqid int, userid t.Uid) error {
 	if cancel != nil {
 		defer cancel()
 	}
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
 
-	_, err = tx.ExecContext(ctx,
+	_, err := a.db.ExecContext(ctx,
 		"DELETE FROM reactions WHERE topic=? AND seqid=? AND userid=?",
 		topic, seqid, store.DecodeUid(userid))
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
 
-	return tx.Commit()
+	return err
 }
 
 // ReactionGetAll returns all reactions for a query.

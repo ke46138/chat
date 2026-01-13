@@ -242,6 +242,10 @@ func TestTopicsForUser(t *testing.T) {
 	testsuite.RunTopicsForUser(t, adp, testData)
 }
 
+func TestTopicsForUserWithReactions(t *testing.T) {
+	testsuite.RunTopicsForUserWithReactions(t, adp, testData)
+}
+
 func TestUsersForTopic(t *testing.T) {
 	testsuite.RunUsersForTopic(t, adp, testData)
 }
