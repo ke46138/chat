@@ -1,12 +1,11 @@
-# THIS SCHEMA FILE IS FOR REFERENCE/DOCUMENTATION ONLY!
-# DO NOT USE IT TO INITIALIZE THE DATABASE.
-# Read installation instructions first.
+-- THIS SCHEMA FILE IS FOR REFERENCE/DOCUMENTATION ONLY!
+-- DO NOT USE IT TO INITIALIZE THE DATABASE.
+-- Read installation instructions first.
 
-# The following line will produce an intentional error.
-
+-- The following line will produce an intentional error.
 'READ INSTALLATION INSTRUCTIONS!';
 
-# The actual schema is below.
+-- The actual schema is below.
 
 DROP DATABASE IF EXISTS tinode;
 
@@ -14,7 +13,7 @@ CREATE DATABASE tinode CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 USE tinode;
 
-
+-- Key-Value metadata store
 CREATE TABLE kvmeta(
 	`key` VARCHAR(64),
 	createdat DATETIME(3),
@@ -25,6 +24,7 @@ CREATE TABLE kvmeta(
 
 INSERT INTO kvmeta(`key`, `value`) VALUES("version", "100");
 
+-- Users
 CREATE TABLE users(
 	id 			BIGINT NOT NULL,
 	createdat 	DATETIME(3) NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE users(
 	INDEX users_lastseen_updatedat(lastseen, updatedat)
 );
 
-# Indexed user tags.
+-- Indexed user tags.
 CREATE TABLE usertags(
 	id 		INT NOT NULL AUTO_INCREMENT,
 	userid 	BIGINT NOT NULL,
@@ -54,7 +54,7 @@ CREATE TABLE usertags(
 	UNIQUE INDEX usertags_userid_tag(userid, tag)
 );
 
-# Indexed devices. Normalized into a separate table.
+-- Indexed devices. Normalized into a separate table.
 CREATE TABLE devices(
 	id 			INT NOT NULL AUTO_INCREMENT,
 	userid 		BIGINT NOT NULL,
@@ -69,7 +69,7 @@ CREATE TABLE devices(
 	UNIQUE INDEX devices_hash(hash)
 );
 
-# Authentication records for the basic authentication scheme.
+-- Authentication records for the basic authentication scheme.
 CREATE TABLE auth(
 	id 		INT NOT NULL AUTO_INCREMENT,
 	uname	VARCHAR(32) NOT NULL,
@@ -86,7 +86,7 @@ CREATE TABLE auth(
 );
 
 
-# Topics
+-- Topics
 CREATE TABLE topics(
 	id			INT NOT NULL AUTO_INCREMENT,
 	createdat 	DATETIME(3) NOT NULL,
@@ -113,7 +113,7 @@ CREATE TABLE topics(
 	INDEX topics_name_state_seqid ON topics(name, state, seqid)
 );
 
-# Indexed topic tags.
+-- Indexed topic tags.
 CREATE TABLE topictags(
 	id 		INT NOT NULL AUTO_INCREMENT,
 	topic 	CHAR(25) NOT NULL,
@@ -125,7 +125,7 @@ CREATE TABLE topictags(
 	UNIQUE INDEX topictags_topic_tag(topic, tag)
 );
 
-# Subscriptions
+-- Subscriptions
 CREATE TABLE subscriptions(
 	id			INT NOT NULL AUTO_INCREMENT,
 	createdat	DATETIME(3) NOT NULL,
@@ -148,11 +148,10 @@ CREATE TABLE subscriptions(
 	INDEX subscriptions_user_topic_deletedat ON subscriptions(userid, topic, deletedat)
 );
 
-# Messages
+-- Messages
 CREATE TABLE messages(
 	id 			INT NOT NULL AUTO_INCREMENT,
 	createdat 	DATETIME(3) NOT NULL,
-	updatedat 	DATETIME(3) NOT NULL,
 	deletedat 	DATETIME(3),
 	delid 		INT DEFAULT 0,
 	seqid 		INT NOT NULL,
@@ -166,21 +165,21 @@ CREATE TABLE messages(
 	UNIQUE INDEX messages_topic_seqid (topic, seqid)
 );
 
-# Message reactions
+-- Message reactions
 CREATE TABLE reactions(
-	id          INT NOT NULL AUTO_INCREMENT,
-	createdat   DATETIME(3) NOT NULL,
 	topic       CHAR(25) NOT NULL,
+	mrrid       INT NOT NULL,
 	seqid       INT NOT NULL,
 	userid      BIGINT NOT NULL,
 	content     VARCHAR(32) NOT NULL,
-
-	PRIMARY KEY(id),
+	createdat   DATETIME(3) NOT NULL,
+	PRIMARY KEY(topic, mrrid),
+	INDEX reactions_topic_seqid(topic, seqid),
 	UNIQUE INDEX reactions_topic_seqid_userid(topic, seqid, userid),
-	FOREIGN KEY(topic) REFERENCES topics(name)
+	FOREIGN KEY(topic) REFERENCES topics(name) ON DELETE CASCADE
 );
 
-# Deletion log
+-- Deletion log
 CREATE TABLE dellog(
 	id			INT NOT NULL AUTO_INCREMENT,
 	topic		CHAR(25) NOT NULL,
@@ -199,7 +198,7 @@ CREATE TABLE dellog(
 	INDEX dellog_deletedfor(deletedfor)
 );
 
-# User credentials
+-- User credentials
 CREATE TABLE credentials(
 	id			INT NOT NULL AUTO_INCREMENT,
 	createdat	DATETIME(3) NOT NULL,
@@ -215,10 +214,10 @@ CREATE TABLE credentials(
 
 	PRIMARY KEY(id),
 	UNIQUE credentials_uniqueness(synthetic),
-	FOREIGN KEY(userid) REFERENCES users(id),
+	FOREIGN KEY(userid) REFERENCES users(id)
 );
 
-# Records of uploaded files. Files themselves are stored elsewhere.
+-- Records of uploaded files. Files themselves are stored elsewhere.
 CREATE TABLE fileuploads(
 	id				BIGINT NOT NULL,
 	createdat	DATETIME(3) NOT NULL,
@@ -234,7 +233,7 @@ CREATE TABLE fileuploads(
 	INDEX fileuploads_status(status)
 );
 
-# Links between uploaded files and messages or topics.
+-- Links between uploaded files and messages or topics.
 CREATE TABLE filemsglinks(
 	id			INT NOT NULL AUTO_INCREMENT,
 	createdat	DATETIME(3) NOT NULL,
@@ -246,6 +245,6 @@ CREATE TABLE filemsglinks(
 	PRIMARY KEY(id),
 	FOREIGN KEY(fileid) REFERENCES fileuploads(id) ON DELETE CASCADE,
 	FOREIGN KEY(msgid) REFERENCES messages(id) ON DELETE CASCADE,
-	FOREIGN KEY(topicid) REFERENCES topics(id) ON DELETE CASCADE,
+	FOREIGN KEY(topic) REFERENCES topics(name) ON DELETE CASCADE,
 	FOREIGN KEY(userid) REFERENCES users(id) ON DELETE CASCADE
 );

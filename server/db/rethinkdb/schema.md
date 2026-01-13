@@ -329,3 +329,22 @@ Sample:
   "User": "7j-RR1V7O3Y"
 }
 ```
+
+### Table `reactions`
+Stores user reactions to messages.
+
+Fields:
+* `Id` primary key
+* `CreatedAt` timestamp when the reaction was created
+* `Topic` topic whch received the reaction
+* `MrrId` Topic-wide monotonically increasing ID of the reaction
+* `User` ID of the user who produced the reaction
+* `SeqId` ID of the message which received the reaction
+* `Content` reaction content, e.g. "👍"
+
+Indexes:
+ * `Id` primary key
+ * `Topic` index
+ * `Topic_SeqId` compound index `["Topic", "SeqId"]`
+ * `Topic_MrrId` compound index `["Topic", "MrrId"]`
+ * `Topic_UserId_SeqId` compound index `["Topic", "User", "SeqId"]`
