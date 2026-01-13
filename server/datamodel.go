@@ -118,6 +118,8 @@ type MsgRange struct {
 
 // MsgOneReaction describes one reaction type for a single message.
 type MsgOneReaction struct {
+	// Most recent (greatest) reaction ID for this content.
+	MrrId int `json:"mrrid,omitempty"`
 	// Reaction content (emoji etc.).
 	Value string `json:"val,omitempty"`
 	// Number of users who reacted with this value (count be 0 for p2p and group topics).

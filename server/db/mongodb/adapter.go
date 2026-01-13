@@ -2800,11 +2800,13 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 				SeqId   int    `bson:"seqid"`
 				Content string `bson:"content"`
 				Cnt     int    `bson:"cnt"`
+				MrrId   int    `bson:"mrrid"`
 			}
 			if err := cursor.Decode(&doc); err != nil {
 				return nil, err
 			}
 			r := t.OneTypeReaction{
+				MrrId:   doc.MrrId,
 				Content: doc.Content,
 				Cnt:     doc.Cnt,
 				Users:   nil,
@@ -2854,11 +2856,13 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 				SeqId   int      `bson:"seqid"`
 				Content string   `bson:"content"`
 				Users   []string `bson:"users"`
+				MrrId   int      `bson:"mrrid"`
 			}
 			if err := cursor.Decode(&doc); err != nil {
 				return nil, err
 			}
 			r := t.OneTypeReaction{
+				MrrId:   doc.MrrId,
 				Content: doc.Content,
 				Cnt:     len(doc.Users),
 				Users:   make([]string, 0, len(doc.Users)),

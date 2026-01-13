@@ -3190,6 +3190,7 @@ func (t *Topic) replyGetReact(sess *Session, asUid types.Uid, req *MsgGetOpts, m
 					rs.Reacts = make([]MsgOneReaction, len(agr.Data))
 					for i, dt := range agr.Data {
 						rs.Reacts[i] = MsgOneReaction{
+							MrrId: dt.MrrId,
 							Value: dt.Content,
 							Count: dt.Cnt,
 							Users: dt.Users,
@@ -3241,7 +3242,7 @@ func (t *Topic) replySetReact(sess *Session, asUid types.Uid, asChan bool, msg *
 		}
 
 		if err == nil {
-			err = store.Messages.SaveReaction(t.name, t.mrrID + 1, react.SeqId, asUid, react.Value)
+			err = store.Messages.SaveReaction(t.name, t.mrrID+1, react.SeqId, asUid, react.Value)
 			if err == nil {
 				t.mrrID++
 			}

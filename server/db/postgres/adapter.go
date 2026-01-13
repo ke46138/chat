@@ -3086,9 +3086,9 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 		orderBy = " ORDER BY MAX(mrrid) DESC"
 	}
 
-	projection := "seqid,content,JSON_AGG(userid) AS users"
+	projection := "seqid,content,JSON_AGG(userid) AS users,MAX(mrrid) AS maxmrrid"
 	if asChan {
-		projection = "seqid,content,COUNT(*) AS cnt"
+		projection = "seqid,content,COUNT(*) AS cnt,MAX(mrrid) AS maxmrrid"
 	}
 
 	// Prepend topic to args.
@@ -3117,10 +3117,11 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 			var seqId int
 			var content string
 			var cnt int
-			if err = rows.Scan(&seqId, &content, &cnt); err != nil {
+			var mrrId int
+			if err = rows.Scan(&seqId, &content, &cnt, &mrrId); err != nil {
 				return nil, err
 			}
-			r := t.OneTypeReaction{Content: content, Cnt: cnt}
+			r := t.OneTypeReaction{Content: content, Cnt: cnt, MrrId: mrrId}
 			reactions[seqId] = append(reactions[seqId], r)
 			collectedSeqIds = append(collectedSeqIds, seqId)
 		}
@@ -3155,7 +3156,8 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 			var seqId int
 			var content string
 			var usersRaw []byte
-			if err = rows.Scan(&seqId, &content, &usersRaw); err != nil {
+			var mrrId int
+			if err = rows.Scan(&seqId, &content, &usersRaw, &mrrId); err != nil {
 				return nil, err
 			}
 
@@ -3166,6 +3168,7 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 			}
 
 			r := t.OneTypeReaction{
+				MrrId:   mrrId,
 				Content: content,
 				Cnt:     len(ids),
 				Users:   make([]string, 0, len(ids)),

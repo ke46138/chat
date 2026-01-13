@@ -1244,6 +1244,8 @@ type Message struct {
 
 // Reaction of one type, e.g. all likes in one message.
 type OneTypeReaction struct {
+	// Most recent (greatest) reaction ID for this content.
+	MrrId int
 	// Reaction content: emoji grapheme cluster or poll vote.
 	Content string
 	// Number of users who reacted with this content.

@@ -2553,6 +2553,9 @@ func (a *adapter) reactionsForSet(topic string, forUser t.Uid, asChan bool, opts
 			agg[rec.SeqId][rec.Content] = ar
 		}
 		ar.Cnt++
+		if rec.MrrId > ar.MrrId {
+			ar.MrrId = rec.MrrId
+		}
 		// Store users only when not asChan; for asChan we'll mark current user's reaction separately
 		if !asChan {
 			// rec.User is stored as raw id (no 'usr' prefix); convert to 'usr' format

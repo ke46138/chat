@@ -62,6 +62,9 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 				if len(r.Users) != 2 {
 					t.Error("Expected 2 users, got", r.Users)
 				}
+				if r.MrrId != 2 {
+					t.Errorf("Expected MrrId 2, got %d", r.MrrId)
+				}
 			}
 		}
 	}
@@ -83,6 +86,9 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 	for _, r := range rarr {
 		if r.Content == "👍" {
 			gotCnt = r.Cnt
+			if r.MrrId != 2 {
+				t.Errorf("asChan Expected MrrId 2, got %d", r.MrrId)
+			}
 			if len(r.Users) == 1 && r.Users[0] == u00.UserId() {
 				gotMarked = true
 			}
@@ -115,10 +121,16 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 				if r.Cnt != 1 {
 					t.Error("Expected 👍 cnt 1 got", r.Cnt)
 				}
+				if r.MrrId != 1 {
+					t.Errorf("Expected 👍 MrrId 1, got %d", r.MrrId)
+				}
 				foundPlus = true
 			case "❤️":
 				if r.Cnt != 1 {
 					t.Error("Expected ❤️ cnt 1 got", r.Cnt)
+				}
+				if r.MrrId != 3 {
+					t.Errorf("Expected ❤️ MrrId 3, got %d", r.MrrId)
 				}
 				foundHeart = true
 			}
@@ -148,6 +160,9 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 			if r.Content == "❤️" {
 				if r.Cnt != 1 {
 					t.Error("Expected ❤️ cnt 1 got", r.Cnt)
+				}
+				if r.MrrId != 3 {
+					t.Errorf("Since 2 Expected ❤️ MrrId 3, got %d", r.MrrId)
 				}
 			}
 		}
