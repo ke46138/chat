@@ -670,7 +670,7 @@ type MessagesPersistenceInterface interface {
 	DeleteList(topic string, delID int, forUser types.Uid, msgDelAge time.Duration, ranges []types.Range) error
 	GetAll(topic string, forUser types.Uid, asChan bool, opt *types.QueryOpt) ([]types.Message, error)
 	GetDeleted(topic string, forUser types.Uid, opt *types.QueryOpt) ([]types.Range, int, error)
-	SaveReaction(topic string, seqId int, userId types.Uid, content string) error
+	SaveReaction(topic string, mrrId, seqId int, userId types.Uid, content string) error
 	DeleteReaction(topic string, seqId int, userId types.Uid) error
 	GetReactions(topic string, forUser types.Uid, asChan bool, opt *types.QueryOpt) ([]types.AggrReaction, error)
 }
@@ -799,9 +799,10 @@ func (messagesMapper) GetDeleted(topic string, forUser types.Uid, opt *types.Que
 }
 
 // SaveReaction saves a reaction to a message.
-func (messagesMapper) SaveReaction(topic string, seqId int, user types.Uid, content string) error {
+func (messagesMapper) SaveReaction(topic string, mrrId, seqId int, user types.Uid, content string) error {
 	return adp.ReactionSave(&types.Reaction{
 		Topic:     topic,
+		MrrId:     mrrId,
 		SeqId:     seqId,
 		User:      user.String(),
 		Content:   content,

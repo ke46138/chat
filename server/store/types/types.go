@@ -1264,6 +1264,7 @@ type AggrReaction struct {
 type Reaction struct {
 	CreatedAt time.Time
 	Topic     string
+	MrrId     int
 	SeqId     int
 	User      string
 	Content   string

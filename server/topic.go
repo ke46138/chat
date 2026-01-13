@@ -47,6 +47,8 @@ type Topic struct {
 	lastID int
 	// ID of the deletion operation. Not an ID of the message.
 	delID int
+	// ID of the most recent reaction to a message.
+	mrrID int
 
 	// Total count of subscribers (excluding deleted).
 	// This is different from subsCount() for channels.
@@ -3237,7 +3239,13 @@ func (t *Topic) replySetReact(sess *Session, asUid types.Uid, asChan bool, msg *
 				}
 			}
 		}
-		err = store.Messages.SaveReaction(t.name, react.SeqId, asUid, react.Value)
+
+		if err == nil {
+			err = store.Messages.SaveReaction(t.name, t.mrrID + 1, react.SeqId, asUid, react.Value)
+			if err == nil {
+				t.mrrID++
+			}
+		}
 	}
 	if err != nil {
 		sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Set.Id, t.original(asUid), now, msg.Timestamp, nil))
