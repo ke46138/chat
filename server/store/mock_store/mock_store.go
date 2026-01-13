@@ -1133,17 +1133,17 @@ func (mr *MockMessagesPersistenceInterfaceMockRecorder) Save(msg, attachmentURLs
 }
 
 // SaveReaction mocks base method.
-func (m *MockMessagesPersistenceInterface) SaveReaction(topic string, seqId int, userId types.Uid, content string) error {
+func (m *MockMessagesPersistenceInterface) SaveReaction(topic string, mrrId, seqId int, userId types.Uid, content string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveReaction", topic, seqId, userId, content)
+	ret := m.ctrl.Call(m, "SaveReaction", topic, mrrId, seqId, userId, content)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // SaveReaction indicates an expected call of SaveReaction.
-func (mr *MockMessagesPersistenceInterfaceMockRecorder) SaveReaction(topic, seqId, userId, content interface{}) *gomock.Call {
+func (mr *MockMessagesPersistenceInterfaceMockRecorder) SaveReaction(topic, mrrId, seqId, userId, content interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveReaction", reflect.TypeOf((*MockMessagesPersistenceInterface)(nil).SaveReaction), topic, seqId, userId, content)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveReaction", reflect.TypeOf((*MockMessagesPersistenceInterface)(nil).SaveReaction), topic, mrrId, seqId, userId, content)
 }
 
 // MockDevicePersistenceInterface is a mock of DevicePersistenceInterface interface.

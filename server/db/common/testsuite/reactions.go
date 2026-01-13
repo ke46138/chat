@@ -2,7 +2,6 @@ package testsuite
 
 import (
 	"testing"
-	"time"
 
 	adapter "github.com/tinode/chat/server/db"
 	"github.com/tinode/chat/server/db/common/test_data"
@@ -15,7 +14,7 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 
 	// Ensure topic exists (adapter should handle this, but check for sanity)
 	if _, err := adp.TopicGet(td.Topics[1].Id); err != nil {
-		t.Fatal(err)
+		t.Fatal("TopicGet", err)
 	}
 
 	// Use topic[1] which still has messages at this point in the test suite.
@@ -23,29 +22,31 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 	seq := td.Reacts[0].SeqId
 
 	u00 := types.ParseUid(td.Reacts[0].User)
-	u10 := types.ParseUid(td.Reacts[1].User)
 
 	// No reactions added yet: should return nil map and no error.
-	got, err := adp.ReactionGetAll(topic, u00, false, nil)
-	if err == nil || len(got) != 0 {
-		t.Error("Expected no reactions for nil opts")
+	_, err := adp.ReactionGetAll(topic, u00, false, nil)
+	if err == nil {
+		t.Error("Expected error for nil opts")
 	}
 
 	// Save two identical reactions from two users
 	r1 := td.Reacts[0]
+	r1.MrrId = 1
 	if err := adp.ReactionSave(r1); err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionSave 1", err)
 	}
 
 	r2 := td.Reacts[1]
+	r2.MrrId = 2
 	if err := adp.ReactionSave(r2); err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionSave 2", err)
 	}
 
-	opts := &types.QueryOpt{IdRanges: []types.Range{{Low: seq}}}
+	// Query Since 1 (>= 1). Should return both.
+	opts := &types.QueryOpt{Since: 1}
 	reacts, err := adp.ReactionGetAll(topic, u00, false, opts)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionGetAll Since 1", err)
 	}
 	if len(reacts) == 0 {
 		t.Fatal("No reactions returned")
@@ -71,7 +72,7 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 	// asChan mode: counts and current user's marking
 	reactsChan, err := adp.ReactionGetAll(topic, u00, true, opts)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionGetAll asChan", err)
 	}
 	rarr := reactsChan[seq]
 	if len(rarr) == 0 {
@@ -96,12 +97,13 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 
 	// Update reaction by changing u1 reaction to ❤️
 	r1b := td.Reacts[2]
+	r1b.MrrId = 3 // This won't change the MrrId in DB because of ON DUPLICATE KEY UPDATE content
 	if err := adp.ReactionSave(r1b); err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionSave 3", err)
 	}
 	reacts, err = adp.ReactionGetAll(topic, u00, false, opts)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionGetAll", err)
 	}
 	// Expect ❤️ cnt 1 and 👍 cnt 1
 	foundPlus := false
@@ -126,14 +128,65 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 		t.Error("expected both 👍 and ❤️ reactions")
 	}
 
-	// Delete u0 reaction
+	// Test Since > 1. Should return r2 (MrrId 2) only. r1 is MrrId 1.
+	// r1b updated r2? No r1b is td.Reacts[2] which is User[1] same as r2.
+	// So r2 was updated to Heart. r2 has MrrId 2.
+	// r1 (User[0]) is ThumbsUp. MrrId 1.
+	// So reacts should contain MrrId 1 (Thumbs) and MrrId 2 (Heart).
+	// Query Since 2: Should return MrrId 2 (Heart).
+	optsSince2 := &types.QueryOpt{Since: 2}
+	reacts, err = adp.ReactionGetAll(topic, u00, false, optsSince2)
+	if err != nil {
+		t.Fatal("ReactionGetAll Since 2", err)
+	}
+	// We expect only Heart.
+	for _, arr := range reacts {
+		for _, r := range arr {
+			if r.Content == "👍" {
+				t.Error("Did not expect 👍 with Since 2")
+			}
+			if r.Content == "❤️" {
+				if r.Cnt != 1 {
+					t.Error("Expected ❤️ cnt 1 got", r.Cnt)
+				}
+			}
+		}
+	}
+
+	// Test Before 2. Should return r1 (MrrId 1).
+	optsBefore2 := &types.QueryOpt{Before: 2}
+	reacts, err = adp.ReactionGetAll(topic, u00, false, optsBefore2)
+	if err != nil {
+		t.Fatal("ReactionGetAll Before 2", err)
+	}
+	// We expect only ThumbsUp.
+	foundPlus = false
+	foundHeart = false
+	for _, arr := range reacts {
+		for _, r := range arr {
+			if r.Content == "👍" {
+				foundPlus = true
+			}
+			if r.Content == "❤️" {
+				foundHeart = true
+			}
+		}
+	}
+	if !foundPlus {
+		t.Error("Expected 👍 with Before 2")
+	}
+	if foundHeart {
+		t.Error("Did not expect ❤️ with Before 2")
+	}
+
+	// Delete u0 reaction (MrrId 1)
 	if err := adp.ReactionDelete(topic, seq, u00); err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionDelete", err)
 	}
 
 	reacts, err = adp.ReactionGetAll(topic, u00, false, opts)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionGetAll after delete", err)
 	}
 	if len(reacts) != 1 {
 		t.Error("Expected reaction to one message only after delete, got", len(reacts))
@@ -148,61 +201,43 @@ func RunReactionsCRUD(t *testing.T, adp adapter.Adapter, td *test_data.TestData)
 		}
 	}
 
-	// IfModifiedSince filter
-	// create old reaction and new reaction on another seq
-	seq2 := td.Reacts[3].SeqId
-	old := td.Reacts[3]
+	// Check that LIMIT applies to number of rows returned, which corresponds to unique (seqid, content) + mrrid order.
+	// The implementation sorts by MrrId DESC.
+	// Remaining: MrrId 2 (Heart).
+
+	// Let's add more reactions to test Limit.
+	// create new reaction on another seq
 	newr := td.Reacts[4]
-	if err := adp.ReactionSave(old); err != nil {
-		t.Fatal(err)
-	}
+	newr.MrrId = 4
 	if err := adp.ReactionSave(newr); err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionSave new", err)
 	}
 
-	ims := time.Now().Add(-30 * time.Minute)
-	opts2 := &types.QueryOpt{IdRanges: []types.Range{{Low: seq2}}, IfModifiedSince: &ims}
-	reacts, err = adp.ReactionGetAll(topic, u10, false, opts2)
+	// Now we have MrrId 2 (Heart on seq) and MrrId 4 (new on seq2).
+	// Limit 1 with Since 1. Order DESC. Should return MrrId 4 (new).
+	optsLimit := &types.QueryOpt{Since: 1, Limit: 1}
+	reactsLimit, err := adp.ReactionGetAll(topic, u00, false, optsLimit)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("ReactionGetAll with limit", err)
 	}
-	// expect only "new"
-	for _, arr := range reacts {
+	// Expect only MrrId 4.
+	found4 := false
+	found2 := false
+	for _, arr := range reactsLimit {
 		for _, r := range arr {
-			if r.Content == "old" {
-				t.Error("old reaction should be filtered out by IfModifiedSince")
+			if r.Content == "new" {
+				found4 = true
+			}
+			if r.Content == "❤️" {
+				found2 = true
 			}
 		}
 	}
-
-	// Check that LIMIT applies to number of messages (seqids), not number of reaction rows
-	// Create reactions for two different seqids
-	rA1 := td.Reacts[5]
-	rA2 := td.Reacts[6]
-	rB1 := td.Reacts[7]
-	if err := adp.ReactionSave(rA1); err != nil {
-		t.Fatal(err)
+	if !found4 {
+		t.Error("Expected 'new' reaction (MrrId 4) with Limit 1")
 	}
-	if err := adp.ReactionSave(rA2); err != nil {
-		t.Fatal(err)
-	}
-	if err := adp.ReactionSave(rB1); err != nil {
-		t.Fatal(err)
-	}
-
-	optsLimit := &types.QueryOpt{IdRanges: []types.Range{{Low: td.Reacts[5].SeqId}, {Low: td.Reacts[7].SeqId}}, Limit: 1}
-	reactsLimit, err := adp.ReactionGetAll(topic, u00, false, optsLimit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Expect only one seqid returned (the highest seqid due to ORDER BY seqid DESC in adapter)
-	if len(reactsLimit) != 1 {
-		t.Fatalf("expected 1 seqid due to limit, got %d", len(reactsLimit))
-	}
-	for k := range reactsLimit {
-		if k != td.Reacts[7].SeqId {
-			t.Fatalf("expected seqid %d (highest), got %d", td.Reacts[7].SeqId, k)
-		}
+	if found2 {
+		t.Error("Did not expect '❤️' reaction (MrrId 2) with Limit 1")
 	}
 
 	// Invalid QueryOpt (non-nil but no ranges/since/before) => error
