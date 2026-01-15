@@ -138,6 +138,8 @@ message GetQuery {
 
 // Reaction of a single type for one message.
 message MsgOneReaction {
+	// Most recent (greatest) reaction ID for this content.
+	int32 mrrid = 1;
 	// Reaction content (emoji etc.).
 	string value = 2;
 	// Number of users who reacted with this value (can be 0 for p2p and group topics).
@@ -386,6 +388,8 @@ message TopicDesc {
 	bytes trusted = 14;
 	bool is_chan = 17; // 17!
 	bool online = 18;
+	// Most recent reaction ID
+	int32 mrr_id = 19;
 
 	// P2P only: other user's last online timestamp & user agent
 	int64 last_seen_time = 15;
@@ -420,6 +424,8 @@ message TopicSub {
 	int32 seq_id = 12;
 	// Messages are deleted up to this ID
 	int32 del_id = 13;
+	// Most recent reaction ID
+	int32 mrr_id = 17;
 
 	// P2P topics only:
 
@@ -486,6 +492,8 @@ message ServerPres {
 	int32 seq_id = 5;
 	int32 del_id = 6;
 	repeated SeqRange del_seq = 7;
+	// Secondary context-dependent ID (e.g., most recent reaction ID for "react" notifications).
+	int32 id2 = 11;
 	string target_user_id = 8;
 	string actor_user_id = 9;
 	AccessMode acs = 10;

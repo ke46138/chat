@@ -92,6 +92,7 @@ func pbServPresSerialize(pres *MsgServerPres) *pbx.ServerMsg_Pres {
 			SeqId:        int32(pres.SeqId),
 			DelId:        int32(pres.DelId),
 			DelSeq:       pbDelQuerySerialize(pres.DelSeq),
+			Id2:          int32(pres.Id2),
 			TargetUserId: pres.AcsTarget,
 			ActorUserId:  pres.AcsActor,
 			Acs:          pbAccessModeSerialize(pres.Acs),
@@ -214,6 +215,7 @@ func pbServDeserialize(pkt *pbx.ServerMsg) *ServerComMessage {
 			SeqId:     int(pres.GetSeqId()),
 			DelId:     int(pres.GetDelId()),
 			DelSeq:    pbDelQueryDeserialize(pres.GetDelSeq()),
+			Id2:       int(pres.GetId2()),
 			AcsTarget: pres.GetTargetUserId(),
 			AcsActor:  pres.GetActorUserId(),
 			Acs:       pbAccessModeDeserialize(pres.GetAcs()),
@@ -570,6 +572,7 @@ func pbMsgOneReactionSerialize(r MsgOneReaction) *pbx.MsgOneReaction {
 		return nil
 	}
 	return &pbx.MsgOneReaction{
+		Mrrid: int32(r.MrrId),
 		Value: r.Value,
 		Count: int32(r.Count),
 		Users: r.Users,
@@ -593,7 +596,7 @@ func pbMsgOneReactionDeserialize(r *pbx.MsgOneReaction) MsgOneReaction {
 	if r == nil {
 		return MsgOneReaction{}
 	}
-	return MsgOneReaction{Value: r.GetValue(), Count: int(r.GetCount()), Users: r.GetUsers()}
+	return MsgOneReaction{MrrId: int(r.GetMrrid()), Value: r.GetValue(), Count: int(r.GetCount()), Users: r.GetUsers()}
 }
 
 func pbMsgOneReactionsDeserialize(in []*pbx.MsgOneReaction) []MsgOneReaction {
@@ -1022,6 +1025,7 @@ func pbTopicDescSerialize(desc *MsgTopicDesc) *pbx.TopicDesc {
 		ReadId:    int32(desc.ReadSeqId),
 		RecvId:    int32(desc.RecvSeqId),
 		DelId:     int32(desc.DelId),
+		MrrId:     int32(desc.MrrId),
 		Public:    interfaceToBytes(desc.Public),
 		Trusted:   interfaceToBytes(desc.Trusted),
 		Private:   interfaceToBytes(desc.Private),
@@ -1050,6 +1054,7 @@ func pbTopicDescDeserialize(desc *pbx.TopicDesc) *MsgTopicDesc {
 		ReadSeqId:  int(desc.ReadId),
 		RecvSeqId:  int(desc.RecvId),
 		DelId:      int(desc.DelId),
+		MrrId:      int(desc.MrrId),
 		Public:     bytesToInterface(desc.Public),
 		Trusted:    bytesToInterface(desc.Trusted),
 		Private:    bytesToInterface(desc.Private),
@@ -1110,6 +1115,7 @@ func pbTopicSubSerialize(sub *MsgTopicSub) *pbx.TopicSub {
 		TouchedAt: timeToInt64(sub.TouchedAt),
 		SeqId:     int32(sub.SeqId),
 		DelId:     int32(sub.DelId),
+		MrrId:     int32(sub.MrrId),
 	}
 	if sub.LastSeen != nil {
 		out.LastSeenTime = timeToInt64(sub.LastSeen.When)
@@ -1139,6 +1145,7 @@ func pbTopicSubSliceDeserialize(subs []*pbx.TopicSub) []MsgTopicSub {
 			TouchedAt: int64ToTime(subs[i].GetTouchedAt()),
 			SeqId:     int(subs[i].GetSeqId()),
 			DelId:     int(subs[i].GetDelId()),
+			MrrId:     int(subs[i].GetMrrId()),
 		}
 		if acs := subs[i].GetAcs(); acs != nil {
 			out[i].Acs = *pbAccessModeDeserialize(acs)

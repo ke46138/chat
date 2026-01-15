@@ -2632,6 +2632,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 					}
 					mts.SeqId = sub.GetSeqId()
 					mts.DelId = sub.DelId
+					mts.MrrId = sub.GetMrrId()
 				} else if !sub.UpdatedAt.IsZero() {
 					mts.TouchedAt = &sub.UpdatedAt
 				}
@@ -3253,6 +3254,7 @@ func (t *Topic) replySetReact(sess *Session, asUid types.Uid, asChan bool, msg *
 		return err
 	}
 	params := &presParams{
+		id2:   t.mrrID,
 		value: react.Value,
 		seqID: react.SeqId,
 		actor: asUid.UserId(),
@@ -3264,7 +3266,7 @@ func (t *Topic) replySetReact(sess *Session, asUid types.Uid, asChan bool, msg *
 		uid2 := t.p2pOtherUser(asUid)
 		t.presSingleUserOffline(uid2, t.p2pOtherUserMode(uid2), "react", params, "", true)
 	}
-	sess.queueOut(NoErrReply(msg, now))
+	sess.queueOut(NoErrParamsReply(msg, now, map[string]any{"mrrid": t.mrrID}))
 	return nil
 }
 

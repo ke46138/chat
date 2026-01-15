@@ -15,6 +15,7 @@ type presParams struct {
 	seqID  int
 	delID  int
 	delSeq []MsgRange
+	id2    int
 
 	// Uid who performed the action
 	actor string
@@ -340,6 +341,7 @@ func (t *Topic) presSubsOnline(what, src string, params *presParams, filter *pre
 			SeqId:       params.seqID,
 			DelId:       params.delID,
 			DelSeq:      params.delSeq,
+			Id2:         params.id2,
 			Val:         params.value,
 			FilterIn:    int(filter.filterIn),
 			FilterOut:   int(filter.filterOut),
@@ -379,6 +381,8 @@ func (t *Topic) presSubsOnlineDirect(what string, params *presParams, filter *pr
 			SeqId:  params.seqID,
 			DelId:  params.delID,
 			DelSeq: params.delSeq,
+			Id2:    params.id2,
+			Val:    params.value,
 		},
 	}
 
@@ -467,6 +471,8 @@ func (t *Topic) presSubsOffline(what string, params *presParams,
 				AcsTarget:   target,
 				SeqId:       params.seqID,
 				DelId:       params.delID,
+				Id2:         params.id2,
+				Val:         params.value,
 				FilterIn:    int(filterTarget.filterIn),
 				FilterOut:   int(filterTarget.filterOut),
 				SingleUser:  filterTarget.singleUser,
@@ -577,6 +583,8 @@ func presSubsOfflineOffline(topic string, cat types.TopicCat, subs []types.Subsc
 				AcsTarget: target,
 				SeqId:     params.seqID,
 				DelId:     params.delID,
+				Id2:       params.id2,
+				Val:       params.value,
 			},
 			RcptTo:  user,
 			SkipSid: skipSid,
@@ -620,6 +628,7 @@ func (t *Topic) presSingleUserOffline(uid types.Uid, mode types.AccessMode,
 				Src:       t.original(uid),
 				SeqId:     params.seqID,
 				DelId:     params.delID,
+				Id2:       params.id2,
 				Acs:       params.packAcs(),
 				AcsActor:  actor,
 				AcsTarget: target,
@@ -654,9 +663,11 @@ func presSingleUserOfflineOffline(uid types.Uid, original, what string, params *
 			Src:       original,
 			SeqId:     params.seqID,
 			DelId:     params.delID,
+			Id2:       params.id2,
 			Acs:       params.packAcs(),
 			AcsActor:  actor,
 			AcsTarget: target,
+			Val:       params.value,
 		},
 		RcptTo:  uid.UserId(),
 		SkipSid: skipSid,

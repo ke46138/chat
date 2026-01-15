@@ -715,8 +715,11 @@ type MsgServerPres struct {
 	// Seq ID of the message being affected, if applicable.
 	SeqId int `json:"seq,omitempty"`
 	// Delete ID and ranges of deleted messages, if applicable.
+	// TODO: consider using Id2 instead of DelId.
 	DelId  int        `json:"clear,omitempty"`
 	DelSeq []MsgRange `json:"delseq,omitempty"`
+	// Secondary context-dependent ID.
+	Id2 int `json:"id2,omitempty"`
 	// Target user or topic of the access mode change.
 	AcsTarget string `json:"tgt,omitempty"`
 	// Actor user ID who performed the access mode change.

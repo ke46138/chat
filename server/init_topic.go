@@ -265,6 +265,7 @@ func initTopicP2P(t *Topic, sreg *ClientComMessage) error {
 		t.aux = stopic.Aux
 		t.lastID = stopic.SeqId
 		t.delID = stopic.DelId
+		t.mrrID = stopic.MrrId
 	}
 
 	// t.owner is blank for p2p topics
@@ -661,6 +662,7 @@ func initTopicGrp(t *Topic) error {
 	}
 	t.lastID = stopic.SeqId
 	t.delID = stopic.DelId
+	t.mrrID = stopic.MrrId
 	t.subCnt = stopic.SubCnt
 
 	// Initialize channel for receiving session online updates.
@@ -736,6 +738,7 @@ func initTopicSlf(t *Topic, sreg *ClientComMessage) error {
 		t.aux = stopic.Aux
 		t.lastID = stopic.SeqId
 		t.delID = stopic.DelId
+		t.mrrID = stopic.MrrId
 
 	} else {
 		// Get topic owner.
