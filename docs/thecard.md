@@ -34,23 +34,23 @@ When `JSON` is used to represent `theCard` data, it does it differently than [jC
   },
   comm: [ // array of objects defining means of communication with the the person or topic.
     {
-      des: "home", // contact designation, optional.
+      des: ["home", "voice"], // contact designation, optional.
       proto: "tel", // communication protocol, required
       value: "+17025551234" // phone number.
     },
     {
-      des: "work",
+      des: ["work"],
       proto: "email",
       value: "alice@example.com", // email address
     },
     {
-      des: "other",
+      des: ["other"],
       proto: "tinode",
-      value: "usrRkDVe0PYDOo", // tinode ID, may include server address.
+      value: "tinode:topic/usrRkDVe0PYDOo", // tinode ID URI, may include server address.
     },
     {
       proto: "http", // should be used for either http or https website addresses.
-      value: "https://tinode.co", // address of a website.
+      value: "https://tinode.co", // actual address of a website.
     }, ...
   ],
   bday: { // object, person's birthday.
@@ -61,4 +61,4 @@ When `JSON` is used to represent `theCard` data, it does it differently than [jC
 }
 ```
 
-All fields are optional. Tinode clients currently use only `fn`, `photo`, `note` fields. If other fields are needed in the future, then they will be adopted from the correspondent [vCard](https://www.rfc-editor.org/rfc/rfc6350.txt) fields.
+All fields are optional. Tinode clients currently use only `fn`, `photo`, `org`, `note`, `comm` fields. If other fields are needed in the future, then they will be adopted from the correspondent [vCard](https://www.rfc-editor.org/rfc/rfc6350.txt) fields.
