@@ -165,9 +165,6 @@ var tags = map[string]spanfmt{
 	"ST": {"*", false},
 }
 
-// Type of the formatter to apply to tree nodes.
-type formatter func(n *node, state any) error
-
 // toTree converts a drafty document into a tree of formatted spans.
 // Each node of the tree is uniformly formatted.
 func toTree(drafty *document) (*node, error) {
@@ -279,6 +276,8 @@ func forEach(g *graphemes, start, end int, spans []*span) ([]*node, error) {
 	return result, nil
 }
 
+var expand = map[string]string{"AU": "AUDIO", "EX": "FILE", "IM": "IMAGE", "TC": "CONTACT", "VD": "VIDEO"}
+
 // plainTextFormatter converts a tree of formatted spans into plan text.
 func plainTextFormatter(n *node, ctx any) error {
 	if n.sp != nil && n.sp.tp == "QQ" {
@@ -321,12 +320,17 @@ func plainTextFormatter(n *node, ctx any) error {
 	case "BR":
 		state.txt += "\n"
 	case "AU", "EX", "IM", "VD":
-		name, ok := nullableMapGet(n.sp.data, "name")
-		if !ok || name == "" {
+		name, _ := nullableMapGet(n.sp.data, "name")
+		if name == "" {
 			name = "?"
 		}
-		expand := map[string]string{"AU": "AUDIO", "EX": "FILE", "IM": "IMAGE", "VD": "VIDEO"}
 		state.txt += "[" + expand[n.sp.tp] + " '" + name + "']"
+	case "TC":
+		name, _ := nullableMapGet(n.sp.data, "fn")
+		if name == "" {
+			name = "?"
+		}
+		state.txt += "[CONTACT '" + name + "']"
 	case "VC":
 		state.txt += "[CALL]"
 	default:
@@ -533,7 +537,8 @@ func decodeAsEntity(content any) (*entity, error) {
 }
 
 // A whitelist of entity fields to copy.
-var lightFields = []string{"mime", "name", "width", "height", "size", "url", "ref"}
+var lightFields = []string{"mime", "name", "width", "height",
+	"size", "url", "ref", "fn", "org"}
 
 // copyLight makes a copy of an entity retaining keys from the white list.
 // It also ensures the copied values are either basic types of fixed length or a

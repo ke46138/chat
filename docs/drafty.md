@@ -64,6 +64,7 @@ If key is provided, it's a 0-based index into the `ent` array which contains ext
  * `LN`: link (URL) [https://api.tinode.co](https://api.tinode.co).
  * `MN`: mention such as [@tinode](#).
  * `RW`: logical grouping of formats, a row; may also be represented as a basic decoration.
+ * `TC`: contact information in the form of [TheCard](thecard.md).
  * `VC`: video (and audio) calls.
  * `VD`: inline video.
 
@@ -295,6 +296,11 @@ Hashtag `data` contains a single `val` field with the hashtag value which the cl
 { "tp":"HT", "data":{ "val":"tinode" } }
 ```
 
+
+#### `TC`: contact information
+See [TheCard](thecard.md).
+
+
 #### `VC`: video call control message
 Video call `data` contains current state of the call and its duration:
 ```js
@@ -321,6 +327,7 @@ Video call `data` contains current state of the call and its duration:
 * `aonly`: true if this is an audio-only call (no video).
 
 The `VC` may also be represented as a format `"fmt": [{"len": 1, "tp": "VC"}]` with no entity. In such a case all call information is contained in the `head` fields of the enclosing message.
+
 
 #### `VD`: video with preview
 `VD` represents a video recording. The `data` contains the following fields:

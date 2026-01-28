@@ -46,7 +46,7 @@ When `JSON` is used to represent `theCard` data, it does it differently than [jC
     {
       des: ["other"],
       proto: "tinode",
-      value: "tinode:topic/usrRkDVe0PYDOo", // tinode ID URI, may include server address.
+      value: "tinode:id/usrRkDVe0PYDOo", // tinode ID URI, may include server address: 'tinode://web.tinode.co/id/usrRkDVe0PYDOo'.
     },
     {
       proto: "http", // should be used for either http or https website addresses.
